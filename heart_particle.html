@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trai Tim - Ly Tuan Style</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #000;
+            height: 100vh;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+        }
+
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        let width, height;
+        let time = 0;
+        let centerX, centerY, baseScale;
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            centerX = width / 2;
+            centerY = height / 2;
+            baseScale = Math.min(width, height) * 0.022;
+            initHeart();
+            initAmbient();
+        }
+
+        function pointOnHeart(t, scale) {
+            const x = 16 * Math.pow(Math.sin(t), 3);
+            const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+            return { x: x * scale, y: y * scale };
+        }
+
+        // Heart particles - flat arrays
+        let hpx, hpy, hSize, hTwinklePhase, hTwinkleSpeed;
+        let hColors;
+        let hRandPhase, hRandSpeedX, hRandSpeedY;
+        let hBaseSize;
+        let hTargetX, hTargetY;
+        // Lưu vị trí trước đó để tạo motion trail
+        let hPrevX, hPrevY;
+        let isTextMode = false;
+        let transitionProgress = 0;
+        const TRANSITION_DURATION = 180;
+        // Cờ để biết có cần vẽ trail không
+        let isTransitioning = false;
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            centerX = width / 2;
+            centerY = height / 2;
+            baseScale = Math.min(width, height) * 0.022;
+            initHeart();
+            initAmbient();
+        }
+
+        function pointOnHeart(t, scale) {
+            const x = 16 * Math.pow(Math.sin(t), 3);
+            const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+            return { x: x * scale, y: y * scale };
+        }
+
+        // Generate text points for "VÃN"
+        function getTextPoints(text, fontSize) {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = width;
+            tempCanvas.height = height;
+            const tempCtx = tempCanvas.getContext('2d');
+
+            tempCtx.fillStyle = '#fff';
+            tempCtx.font = `bold ${fontSize}px Arial`;
+            tempCtx.textAlign = 'center';
+            tempCtx.textBaseline = 'middle';
+            tempCtx.fillText(text, centerX, centerY);
+
+            const imageData = tempCtx.getImageData(0, 0, width, height);
+            const data = imageData.data;
+            const points = [];
+
+            // Sample pixels to create text shape
+            for (let y = 0; y < height; y += 4) {
+                for (let x = 0; x < width; x += 4) {
+                    const alpha = data[(y * width + x) * 4 + 3];
+                    if (alpha > 128) {
+                        points.push({
+                            x: x - centerX,
+                            y: y - centerY
+                        });
+                    }
+                }
+            }
+
+            return points;
+        }
+
+        function initHeart() {
+            const colors = ['#ffb6c1', '#ffc0cb', '#ff85a2', '#ff9eb5', '#ffafcc', '#ffaec9'];
+            const positions = [];
+
+            // Viền chính - cực dày (giảm 20%)
+            for (let t = 0; t < Math.PI * 2; t += 0.01) {
+                const point = pointOnHeart(t, baseScale);
+                for (let i = 0; i < 3; i++) {
+                    positions.push({
+                        x: point.x + (Math.random() - 0.5) * 4,
+                        y: point.y + (Math.random() - 0.5) * 4,
+                        size: Math.random() * 0.6 + 0.6,
+                        color: colors[Math.floor(Math.random() * colors.length)]
+                    });
+                }
+            }
+
+            // Lớp viền phụ bên trong (giảm 20%)
+            for (let t = 0; t < Math.PI * 2; t += 0.025) {
+                const point = pointOnHeart(t, baseScale * 0.92);
+                for (let i = 0; i < 2; i++) {
+                    positions.push({
+                        x: point.x + (Math.random() - 0.5) * 3,
+                        y: point.y + (Math.random() - 0.5) * 3,
+                        size: Math.random() * 0.5 + 0.5,
+                        color: colors[Math.floor(Math.random() * colors.length)]
+                    });
+                }
+            }
+
+            // Lớp viền phụ bên ngoài (giảm 20%)
+            for (let t = 0; t < Math.PI * 2; t += 0.031) {
+                const point = pointOnHeart(t, baseScale * 1.08);
+                positions.push({
+                    x: point.x + (Math.random() - 0.5) * 3,
+                    y: point.y + (Math.random() - 0.5) * 3,
+                    size: Math.random() * 0.5 + 0.5,
+                    color: colors[Math.floor(Math.random() * colors.length)]
+                });
+            }
+
+            // Particles bên trong (giảm 20%: 200 → 160)
+            for (let i = 0; i < 160; i++) {
+                const t = Math.random() * Math.PI * 2;
+                const point = pointOnHeart(t, baseScale * 0.7);
+                positions.push({
+                    x: point.x + (Math.random() - 0.5) * 8,
+                    y: point.y + (Math.random() - 0.5) * 8,
+                    size: Math.random() * 0.6 + 0.5,
+                    color: colors[Math.floor(Math.random() * colors.length)]
+                });
+            }
+
+            const n = positions.length;
+            hpx = new Float32Array(n);
+            hpy = new Float32Array(n);
+            hSize = new Float32Array(n);
+            hBaseSize = new Float32Array(n);
+            hTwinklePhase = new Float32Array(n);
+            hTwinkleSpeed = new Float32Array(n);
+            hColors = new Array(n);
+            hRandPhase = new Float32Array(n);
+            hRandSpeedX = new Float32Array(n);
+            hRandSpeedY = new Float32Array(n);
+            hTargetX = new Float32Array(n);
+            hTargetY = new Float32Array(n);
+            hPrevX = new Float32Array(n);
+            hPrevY = new Float32Array(n);
+
+            for (let i = 0; i < n; i++) {
+                const p = positions[i];
+                hpx[i] = p.x;
+                hpy[i] = p.y;
+                hSize[i] = p.size;
+                hBaseSize[i] = p.size;
+                hColors[i] = p.color;
+                hTwinklePhase[i] = Math.random() * Math.PI * 2;
+                hTwinkleSpeed[i] = Math.random() * 0.06 + 0.025;
+                hRandPhase[i] = Math.random() * Math.PI * 2;
+                hRandSpeedX[i] = Math.random() * 0.03 + 0.01;
+                hRandSpeedY[i] = Math.random() * 0.03 + 0.01;
+                hTargetX[i] = p.x;
+                hTargetY[i] = p.y;
+                hPrevX[i] = p.x;
+                hPrevY[i] = p.y;
+            }
+        }
+
+        // Ambient particles
+        let ax, ay, avx, avy, aSize, aLife, aMaxLife, aHue;
+
+        function initAmbient() {
+            const count = 60;
+            ax = new Float32Array(count);
+            ay = new Float32Array(count);
+            avx = new Float32Array(count);
+            avy = new Float32Array(count);
+            aSize = new Float32Array(count);
+            aLife = new Float32Array(count);
+            aMaxLife = new Float32Array(count);
+            aHue = new Float32Array(count);
+
+            for (let i = 0; i < count; i++) {
+                respawnAmbient(i);
+            }
+        }
+
+        function respawnAmbient(i) {
+            const side = Math.floor(Math.random() * 4);
+            if (side === 0) {
+                ax[i] = -10;
+                ay[i] = Math.random() * height;
+            } else if (side === 1) {
+                ax[i] = width + 10;
+                ay[i] = Math.random() * height;
+            } else if (side === 2) {
+                ax[i] = Math.random() * width;
+                ay[i] = -10;
+            } else {
+                ax[i] = Math.random() * width;
+                ay[i] = height + 10;
+            }
+
+            const angle = Math.atan2(centerY - ay[i], centerX - ax[i]);
+            const speed = Math.random() * 0.4 + 0.2;
+            avx[i] = Math.cos(angle) * speed + (Math.random() - 0.5) * 0.2;
+            avy[i] = Math.sin(angle) * speed + (Math.random() - 0.5) * 0.2;
+
+            aSize[i] = Math.random() * 1 + 0.5;
+            aMaxLife[i] = Math.random() * 300 + 200;
+            aLife[i] = aMaxLife[i];
+            aHue[i] = Math.random() * 25 + 340;
+        }
+
+        // Click handler - mỗi click chạy 1 vòng: Heart → VÃN → ANH YÊU EM → Heart
+        let state = 'idle'; // idle, animating_van, waiting_em, animating_heart, done
+        
+        canvas.addEventListener('click', (e) => {
+            if (state !== 'idle') return;
+            
+            state = 'animating_van';
+            
+            // Heart → VÃN
+            for (let i = 0; i < hpx.length; i++) {
+                hPrevX[i] = hpx[i];
+                hPrevY[i] = hpy[i];
+            }
+            isTextMode = true;
+            generateTextTargetPositions('VÃN');
+            transitionProgress = 0;
+            isTransitioning = true;
+        });
+        
+        function checkTransition() {
+            if (state === 'animating_van' && transitionProgress >= 1) {
+                // VÃN xong → ANH YÊU EM
+                for (let i = 0; i < hpx.length; i++) {
+                    hpx[i] = hTargetX[i];
+                    hpy[i] = hTargetY[i];
+                    hPrevX[i] = hpx[i];
+                    hPrevY[i] = hpy[i];
+                }
+                generateTextTargetPositions('ANH YÊU EM');
+                transitionProgress = 0;
+                state = 'waiting_em';
+                setTimeout(() => {
+                    if (state === 'waiting_em') {
+                        // ANH YÊU EM → Trái tim
+                        for (let i = 0; i < hpx.length; i++) {
+                            hpx[i] = hTargetX[i];
+                            hpy[i] = hTargetY[i];
+                            hPrevX[i] = hpx[i];
+                            hPrevY[i] = hpy[i];
+                        }
+                        isTextMode = false;
+                        generateTargetPositions();
+                        transitionProgress = 0;
+                        state = 'animating_heart';
+                    }
+                }, 500);
+            } else if (state === 'animating_heart' && transitionProgress >= 1) {
+                // Trái tim xong → done
+                state = 'done';
+                isTransitioning = false;
+            }
+        }
+
+        let textPoints = [];
+        function generateTextTargetPositions(text) {
+            const fontSize = text === 'ANH YÊU EM' 
+                ? Math.min(width, height) * 0.22 
+                : Math.min(width, height) * 0.35;
+            textPoints = getTextPoints(text, fontSize);
+            
+            const n = hpx.length;
+            for (let i = 0; i < n; i++) {
+                if (i < textPoints.length) {
+                    hTargetX[i] = textPoints[i].x;
+                    hTargetY[i] = textPoints[i].y;
+                } else {
+                    // Những particle thừa đi ra ngoài
+                    const angle = (i - textPoints.length) / (n - textPoints.length) * Math.PI * 2;
+                    hTargetX[i] = Math.cos(angle) * width * 0.8;
+                    hTargetY[i] = Math.sin(angle) * height * 0.8;
+                }
+            }
+        }
+
+        function generateTargetPositions() {
+            const colors = ['#ffb6c1', '#ffc0cb', '#ff85a2', '#ff9eb5', '#ffafcc', '#ffaec9'];
+            const positions = [];
+
+            for (let t = 0; t < Math.PI * 2; t += 0.01) {
+                const point = pointOnHeart(t, baseScale);
+                for (let i = 0; i < 3; i++) {
+                    positions.push({
+                        x: point.x + (Math.random() - 0.5) * 4,
+                        y: point.y + (Math.random() - 0.5) * 4
+                    });
+                }
+            }
+
+            for (let t = 0; t < Math.PI * 2; t += 0.025) {
+                const point = pointOnHeart(t, baseScale * 0.92);
+                for (let i = 0; i < 2; i++) {
+                    positions.push({
+                        x: point.x + (Math.random() - 0.5) * 3,
+                        y: point.y + (Math.random() - 0.5) * 3
+                    });
+                }
+            }
+
+            for (let t = 0; t < Math.PI * 2; t += 0.031) {
+                const point = pointOnHeart(t, baseScale * 1.08);
+                positions.push({
+                    x: point.x + (Math.random() - 0.5) * 3,
+                    y: point.y + (Math.random() - 0.5) * 3
+                });
+            }
+
+            for (let i = 0; i < 160; i++) {
+                const t = Math.random() * Math.PI * 2;
+                const point = pointOnHeart(t, baseScale * 0.7);
+                positions.push({
+                    x: point.x + (Math.random() - 0.5) * 8,
+                    y: point.y + (Math.random() - 0.5) * 8
+                });
+            }
+
+            for (let i = 0; i < hpx.length; i++) {
+                if (i < positions.length) {
+                    hTargetX[i] = positions[i].x;
+                    hTargetY[i] = positions[i].y;
+                }
+            }
+        }
+
+        function easeInOutQuart(t) {
+            return t < 0.5 ? 8 * t * t * t * t : 1 - Math.pow(-2 * t + 2, 4) / 2;
+        }
+
+        function animate() {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+            ctx.fillRect(0, 0, width, height);
+
+            time += 0.025;
+            const beatPhase = (time * 0.4) % 2;
+            let beatScale;
+            if (beatPhase < 0.5) {
+                const p = beatPhase / 0.5;
+                beatScale = 1 + Math.sin(p * Math.PI) * 0.13;
+            } else if (beatPhase < 1.0) {
+                const p = (beatPhase - 0.5) / 0.5;
+                beatScale = 1 - p * 0.04;
+            } else {
+                const p = (beatPhase - 1.0) / 1.0;
+                beatScale = 1 + Math.sin(p * Math.PI) * 0.05;
+            }
+
+            // Update transition
+            if (transitionProgress < 1) {
+                transitionProgress = Math.min(transitionProgress + 1 / TRANSITION_DURATION, 1);
+            }
+            
+            // Check chuyển bước
+            checkTransition();
+
+            const easedSmooth = transitionProgress < 1 ? easeInOutQuart(transitionProgress) : 1;
+            const isActive = transitionProgress > 0 && transitionProgress < 1;
+
+            ctx.globalCompositeOperation = 'lighter';
+
+            const n = hpx.length;
+            const halfN = Math.floor(n / 2);
+
+            // PASS 1: Trails (chỉ vẽ 50% particles)
+            if (isActive) {
+                for (let i = 0; i < halfN; i++) {
+                    hRandPhase[i] += hRandSpeedX[i];
+                    const swirl = Math.sin(transitionProgress * Math.PI * 2 + i * 0.3) * 12 * (1 - transitionProgress);
+
+                    // Luôn lerp từ hPrev → hTarget
+                    const startX = hPrevX[i];
+                    const startY = hPrevY[i];
+                    const endX = hTargetX[i];
+                    const endY = hTargetY[i];
+
+                    const progress = easedSmooth;
+                    const baseX = startX + (endX - startX) * progress;
+                    const baseY = startY + (endY - startY) * progress;
+                    const moveX = Math.sin(hRandPhase[i] * 2 + i) * 2;
+                    const moveY = Math.cos(hRandPhase[i] * 2.3 + i) * 2;
+
+                    // Chỉ 3 trail points thay vì 8
+                    for (let t = 1; t <= 3; t++) {
+                        const tp = 1 - t * 0.25;
+                        const trailSwirl = swirl * tp;
+                        const trailX = centerX + (baseX - (endX - startX) * t * 0.05 + trailSwirl * Math.cos(i)) * beatScale;
+                        const trailY = centerY + (baseY - (endY - startY) * t * 0.05 + trailSwirl * Math.sin(i)) * beatScale;
+                        const trailSize = 1.5 * beatScale * tp;
+                        const trailOpacity = 0.3 * tp;
+
+                        ctx.globalAlpha = trailOpacity;
+                        ctx.fillStyle = hColors[i];
+                        ctx.beginPath();
+                        ctx.arc(trailX, trailY, trailSize, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+
+            // PASS 2: Main particles (tất cả)
+            for (let i = 0; i < n; i++) {
+                hTwinklePhase[i] += hTwinkleSpeed[i];
+                hRandPhase[i] += hRandSpeedX[i];
+
+                const twinkle = (Math.sin(hTwinklePhase[i]) + 1) / 2;
+                const opacity = 0.5 + twinkle * 0.5;
+                const size = hBaseSize[i] * (0.6 + twinkle * 0.6);
+
+                let drawX, drawY;
+
+                if (isActive) {
+                    const swirl = Math.sin(transitionProgress * Math.PI * 2 + i * 0.3) * 12 * (1 - transitionProgress);
+
+                    // Luôn lerp từ hPrev → hTarget
+                    const startX = hPrevX[i];
+                    const startY = hPrevY[i];
+                    const endX = hTargetX[i];
+                    const endY = hTargetY[i];
+
+                    drawX = startX + (endX - startX) * easedSmooth + swirl * Math.cos(i);
+                    drawY = startY + (endY - startY) * easedSmooth + swirl * Math.sin(i);
+                } else {
+                    drawX = hpx[i];
+                    drawY = hpy[i];
+                }
+
+                const moveX = Math.sin(hRandPhase[i] * 2 + i) * 3 + Math.cos(hRandPhase[i] * 3.7 + i) * 2;
+                const moveY = Math.cos(hRandPhase[i] * 2.3 + i) * 3 + Math.sin(hRandPhase[i] * 1.8 + i) * 2;
+
+                const x = centerX + (drawX + moveX) * beatScale;
+                const y = centerY + (drawY + moveY) * beatScale;
+                const drawSize = size * beatScale;
+
+                ctx.globalAlpha = opacity;
+                ctx.fillStyle = hColors[i];
+                ctx.beginPath();
+                ctx.arc(x, y, drawSize, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Draw ambient particles
+            const an = ax.length;
+            for (let i = 0; i < an; i++) {
+                aLife[i]--;
+                if (aLife[i] <= 0) {
+                    respawnAmbient(i);
+                    continue;
+                }
+
+                ax[i] += avx[i];
+                ay[i] += avy[i];
+
+                avx[i] += (Math.random() - 0.5) * 0.02;
+                avy[i] += (Math.random() - 0.5) * 0.02;
+
+                const lifeRatio = aLife[i] / aMaxLife[i];
+                const opacity = Math.sin(lifeRatio * Math.PI) * 0.8;
+
+                const twinkle = (Math.sin(time * 3 + i) + 1) / 2;
+                const drawSize = aSize[i] * (0.5 + twinkle * 0.5);
+
+                ctx.globalAlpha = opacity;
+                ctx.fillStyle = `hsl(${aHue[i]}, 100%, ${65 + twinkle * 15}%)`;
+                ctx.beginPath();
+                ctx.arc(ax[i], ay[i], drawSize, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            ctx.globalAlpha = 1;
+            ctx.globalCompositeOperation = 'source-over';
+
+            requestAnimationFrame(animate);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+        animate();
+    </script>
+</body>
+</html>
